@@ -11,3 +11,15 @@ categories = ["gui", "text-editors"]
 publish = false
 
 [dependencies]
+iced_core = "0.14"
+iced_graphics = "0.14"
+iced_highlighter = { version = "0.14", optional = true }
+log = "0.4"
+
+[features]
+default = ["highlighter"]
+# Syntax highlighting with iced's syntect-based highlighter.
+highlighter = ["dep:iced_highlighter"]
+
+[dev-dependencies]
+iced = { version = "0.14", features = ["highlighter"] }
