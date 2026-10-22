@@ -23,3 +23,4 @@ highlighter = ["dep:iced_highlighter"]
 
 [dev-dependencies]
 iced = { version = "0.14", features = ["highlighter"] }
+iced_test = "0.14"

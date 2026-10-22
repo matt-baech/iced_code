@@ -7,7 +7,10 @@ fn at(line: usize, column: usize) -> Cursor {
 }
 
 fn select(from: (usize, usize), to: (usize, usize)) -> Cursor {
-    Cursor { position: Position { line: to.0, column: to.1 }, selection: Some(Position { line: from.0, column: from.1 }) }
+    Cursor {
+        position: Position { line: to.0, column: to.1 },
+        selection: Some(Position { line: from.0, column: from.1 }),
+    }
 }
 
 fn edit(content: &mut Content, edit: Edit) {

@@ -35,6 +35,9 @@ use std::sync::Arc;
 const GUTTER_PADDING_LEFT: f32 = 12.0;
 const GUTTER_PADDING_RIGHT: f32 = 10.0;
 
+/// Turns key presses into bindings; see [`CodeEditor::key_binding`].
+type KeyBindingFn<'a, Message> = Box<dyn Fn(KeyPress) -> Option<Binding<Message>> + 'a>;
+
 /// A multi-line code editor with line numbers, undo and syntax highlighting.
 ///
 /// # Example
@@ -81,7 +84,7 @@ where
     line_numbers: bool,
     config: Config,
     class: Theme::Class<'a>,
-    key_binding: Option<Box<dyn Fn(KeyPress) -> Option<Binding<Message>> + 'a>>,
+    key_binding: Option<KeyBindingFn<'a, Message>>,
     on_edit: Option<Box<dyn Fn(Action) -> Message + 'a>>,
     highlighter_settings: Highlighter::Settings,
     highlighter_format: fn(&Highlighter::Highlight, &Theme) -> highlighter::Format<Font>,
