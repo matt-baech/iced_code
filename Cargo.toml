@@ -1,0 +1,13 @@
+[package]
+name = "iced_code"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A code editor widget for Iced, with line numbers, undo, and an optional vim mode"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/matt-baech/iced_code"
+keywords = ["iced", "editor", "widget", "gui", "vim"]
+categories = ["gui", "text-editors"]
+publish = false
+
+[dependencies]
