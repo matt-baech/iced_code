@@ -47,7 +47,7 @@ mod text_ops;
 
 pub mod style;
 
-pub use content::{Action, Content, Cursor, Edit, Line, LineEnding, Motion, Position, Word};
+pub use content::{Action, Content, Cursor, Edit, Line, LineEnding, Motion, Position, Search, Word};
 pub use editor::{Binding, CodeEditor, KeyPress, State, code_editor};
 pub use style::{Catalog, Status, Style};
 pub use text_ops::is_word_char;

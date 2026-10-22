@@ -1,6 +1,6 @@
 //! Editing behaviour through the public `Content` API.
 
-use iced_code::{Action, Content, Cursor, Edit, Motion, Position};
+use iced_code::{Action, Content, Cursor, Edit, Motion, Position, Search};
 
 fn at(line: usize, column: usize) -> Cursor {
     Cursor { position: Position { line, column }, selection: None }
@@ -156,4 +156,84 @@ fn paste_is_its_own_step() {
     assert_eq!(content.text(), "abc\nd");
     content.perform(Action::Undo);
     assert_eq!(content.text(), "a");
+}
+
+fn search(text: &str) -> Option<Search> {
+    Some(Search { text: text.to_owned(), ..Search::default() })
+}
+
+#[test]
+fn find_moves_between_matches_and_wraps() {
+    let mut content = Content::with_text("select a\nfrom A\nwhere a = 1");
+    content.set_search(search("a"));
+    assert_eq!(content.match_count(), 3);
+    assert_eq!(content.current_match(), None);
+
+    content.move_to(at(1, 0));
+    assert!(content.find_from_cursor());
+    assert_eq!(content.cursor(), select((1, 5), (1, 6)));
+    assert_eq!(content.current_match(), Some(1));
+
+    assert!(content.find_next());
+    assert_eq!(content.cursor(), select((2, 6), (2, 7)));
+    assert!(content.find_next());
+    assert_eq!(content.cursor(), select((0, 7), (0, 8)));
+    assert!(content.find_previous());
+    assert_eq!(content.cursor(), select((2, 6), (2, 7)));
+
+    content.set_search(Some(Search { text: "a".into(), match_case: true, whole_word: false }));
+    assert_eq!(content.match_count(), 2);
+    content.set_search(Some(Search { text: "a".into(), match_case: false, whole_word: true }));
+    assert_eq!(content.match_count(), 3);
+
+    content.set_search(search(""));
+    assert_eq!(content.search(), None);
+    assert!(!content.find_next());
+}
+
+#[test]
+fn matches_follow_edits() {
+    let mut content = Content::with_text("ab ab");
+    content.set_search(search("ab"));
+    assert_eq!(content.match_count(), 2);
+
+    content.move_to(at(0, 5));
+    type_str(&mut content, " ab");
+    assert_eq!(content.match_count(), 3);
+
+    content.perform(Action::Undo);
+    assert_eq!(content.match_count(), 2);
+}
+
+#[test]
+fn replace_steps_through_matches() {
+    let mut content = Content::with_text("x = 1; x = 2;");
+    content.set_search(search("x"));
+
+    // Not on a match yet: only selects the first.
+    assert!(!content.replace("y"));
+    assert_eq!(content.cursor(), select((0, 0), (0, 1)));
+
+    assert!(content.replace("yy"));
+    assert_eq!(content.text(), "yy = 1; x = 2;");
+    assert_eq!(content.cursor(), select((0, 8), (0, 9)));
+
+    content.perform(Action::Undo);
+    assert_eq!(content.text(), "x = 1; x = 2;");
+}
+
+#[test]
+fn replace_all_is_one_undo_step() {
+    let mut content = Content::with_text("Name, name\nNAME");
+    content.set_search(search("name"));
+
+    assert_eq!(content.replace_all("id"), 3);
+    assert_eq!(content.text(), "id, id\nid");
+    assert_eq!(content.match_count(), 0);
+
+    content.perform(Action::Undo);
+    assert_eq!(content.text(), "Name, name\nNAME");
+
+    content.perform(Action::Redo);
+    assert_eq!(content.text(), "id, id\nid");
 }

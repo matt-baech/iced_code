@@ -750,7 +750,18 @@ where
             }
         }
 
-        if is_focused {
+        if engine.search().is_some() {
+            for region in engine.match_regions() {
+                if let Some(region) = text_bounds.intersection(&(region + translation)) {
+                    renderer
+                        .fill_quad(renderer::Quad { bounds: region, ..renderer::Quad::default() }, style.search_match);
+                }
+            }
+        }
+
+        // While searching, focus is usually in the app's find bar, but the
+        // selected match should still show.
+        if is_focused || engine.search().is_some() {
             for region in engine.selection_regions() {
                 if let Some(region) = text_bounds.intersection(&(region + translation)) {
                     renderer.fill_quad(renderer::Quad { bounds: region, ..renderer::Quad::default() }, style.selection);

@@ -194,6 +194,50 @@ pub(crate) fn word_at(line: &str, col: usize, is_word: impl Fn(char) -> bool) ->
     (start < end).then_some(start..end)
 }
 
+/// The non-overlapping occurrences of `needle` in `line`, as byte ranges.
+/// Without `match_case`, characters are compared ignoring case one by one, so
+/// matches always cover the same number of characters as `needle`. With
+/// `whole_word`, a match can't touch word characters on either side.
+pub(crate) fn find_all(line: &str, needle: &str, match_case: bool, whole_word: bool) -> Vec<Range<usize>> {
+    let same = |a: char, b: char| a == b || (!match_case && a.to_lowercase().eq(b.to_lowercase()));
+    let mut found = Vec::new();
+
+    if needle.is_empty() {
+        return found;
+    }
+
+    let mut from = 0;
+
+    for (start, _) in line.char_indices() {
+        if start < from {
+            continue;
+        }
+
+        let mut haystack = line[start..].char_indices();
+        let matched = needle.chars().all(|n| haystack.next().is_some_and(|(_, h)| same(h, n)));
+
+        if !matched {
+            continue;
+        }
+
+        let end = haystack.next().map_or(line.len(), |(offset, _)| start + offset);
+
+        if whole_word {
+            let before = line[..start].chars().next_back().is_some_and(is_word_char);
+            let after = line[end..].chars().next().is_some_and(is_word_char);
+
+            if before || after {
+                continue;
+            }
+        }
+
+        found.push(start..end);
+        from = end;
+    }
+
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +360,16 @@ mod tests {
         assert_eq!(word_at("a  b", 2, is_word_char), None);
         assert_eq!(word_at(line, 9, |c| is_word_char(c) || c == '.'), Some(7..16));
         assert_eq!(word_at("æøå", 2, is_word_char), Some(0..6));
+    }
+
+    #[test]
+    fn finds_matches() {
+        assert_eq!(find_all("select Name from names", "name", true, false), vec![17..21]);
+        assert_eq!(find_all("select Name from names", "name", false, false), vec![7..11, 17..21]);
+        assert_eq!(find_all("select Name from names", "name", false, true), vec![7..11]);
+        assert_eq!(find_all("aaaa", "aa", true, false), vec![0..2, 2..4]);
+        assert_eq!(find_all("Søk SØK", "søk", false, false), vec![0..4, 5..9]);
+        assert!(find_all("abc", "", false, false).is_empty());
+        assert!(find_all("ab", "abc", false, false).is_empty());
     }
 }

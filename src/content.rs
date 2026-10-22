@@ -1,6 +1,6 @@
 //! The text being edited, and the actions that change it.
 
-use crate::engine::Engine;
+use crate::engine::{Engine, Find};
 use crate::text_ops;
 
 use iced_core::{Point, Rectangle, Size};
@@ -80,6 +80,17 @@ pub enum Edit {
     ToggleComment,
 }
 
+/// What to search for; see [`Content::set_search`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Search {
+    /// The text to find. Searches don't cross line breaks.
+    pub text: String,
+    /// Tell upper and lower case apart.
+    pub match_case: bool,
+    /// Only match whole words.
+    pub whole_word: bool,
+}
+
 /// A word found in the text, with where it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Word {
@@ -129,9 +140,76 @@ impl Content {
         self.engine.get_mut().move_to(cursor);
     }
 
-    /// Replaces the whole text and clears the undo history.
+    /// Replaces the whole text and clears the undo history. Any search is
+    /// kept.
     pub fn set_text(&mut self, text: &str) {
+        let search = self.engine.get_mut().search().cloned();
+
         *self.engine.get_mut() = Engine::with_text(text);
+        self.engine.get_mut().set_search(search);
+    }
+
+    /// Sets what to search for, or `None` to stop searching. The widget
+    /// highlights every match while a search is set. An empty search text
+    /// counts as `None`.
+    pub fn set_search(&mut self, search: Option<Search>) {
+        self.engine.get_mut().set_search(search);
+    }
+
+    /// Returns the current search, if any.
+    pub fn search(&self) -> Option<Search> {
+        self.engine.borrow().search().cloned()
+    }
+
+    /// Returns how many matches the current search has.
+    pub fn match_count(&self) -> usize {
+        self.engine.borrow_mut().matches().len()
+    }
+
+    /// Returns the index of the selected match, if the selection is exactly
+    /// a match. Useful for showing "3 of 12".
+    pub fn current_match(&self) -> Option<usize> {
+        self.engine.borrow_mut().current_match()
+    }
+
+    /// Selects the first match at or after the cursor, wrapping around to the
+    /// top. Call it as the search text changes, so the selection follows
+    /// what's typed. Returns whether there was a match.
+    pub fn find_from_cursor(&mut self) -> bool {
+        self.engine.get_mut().find(Find::FromCursor)
+    }
+
+    /// Selects the next match, wrapping around. Returns whether there was
+    /// one.
+    pub fn find_next(&mut self) -> bool {
+        self.engine.get_mut().find(Find::Next)
+    }
+
+    /// Selects the previous match, wrapping around. Returns whether there was
+    /// one.
+    pub fn find_previous(&mut self) -> bool {
+        self.engine.get_mut().find(Find::Previous)
+    }
+
+    /// Replaces the selected match with `with` and selects the next match.
+    /// When the selection isn't a match, it only selects the next one.
+    /// Returns whether something was replaced.
+    pub fn replace(&mut self, with: &str) -> bool {
+        let replaced = self.current_match().is_some();
+
+        if replaced {
+            self.perform(Action::Edit(Edit::Paste(Arc::new(with.to_owned()))));
+        }
+
+        let _ = self.find_next();
+
+        replaced
+    }
+
+    /// Replaces every match with `with`, as a single undo step. Returns how
+    /// many were replaced.
+    pub fn replace_all(&mut self, with: &str) -> usize {
+        self.engine.get_mut().replace_all(with)
     }
 
     /// Returns the current cursor of the [`Content`].

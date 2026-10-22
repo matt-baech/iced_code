@@ -8,7 +8,7 @@
 //! hand the renderer a weak reference to draw it, the same way iced draws raw
 //! text.
 
-use crate::content::{Action, Edit};
+use crate::content::{Action, Edit, Search};
 use crate::history::{self, History};
 use crate::text_ops::{self, LineEdit};
 
@@ -66,6 +66,29 @@ pub(crate) struct Engine {
     version: text::Version,
     history: History<cosmic_text::Change, CursorState>,
     config: Config,
+    search: Option<Search>,
+    /// The matches of `search`, worked out on demand and dropped on every
+    /// change to the text.
+    matches: Option<Vec<Match>>,
+}
+
+/// A search match: a line and a byte range within it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Match {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Which match [`Engine::find`] selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Find {
+    /// The first match at or after the start of the selection (or cursor).
+    FromCursor,
+    /// The first match after the selection (or cursor).
+    Next,
+    /// The last match before the selection (or cursor).
+    Previous,
 }
 
 impl Engine {
@@ -87,6 +110,8 @@ impl Engine {
             version: font_system.version(),
             history: History::new(HISTORY_LIMIT),
             config,
+            search: None,
+            matches: None,
         }
     }
 
@@ -184,10 +209,15 @@ impl Engine {
 
     /// The highlighted regions of the selection, relative to the text origin.
     pub fn selection_regions(&self) -> Vec<Rectangle> {
-        let Some((start, end)) = self.editor.selection_bounds() else {
-            return Vec::new();
-        };
+        match self.editor.selection_bounds() {
+            Some((start, end)) => self.regions(start, end),
+            None => Vec::new(),
+        }
+    }
 
+    /// The highlighted regions of the text between two cursors, relative to
+    /// the text origin.
+    fn regions(&self, start: cosmic_text::Cursor, end: cosmic_text::Cursor) -> Vec<Rectangle> {
         let buffer = self.buffer();
         let line_height = buffer.metrics().line_height;
         let selected_lines = end.line - start.line + 1;
@@ -297,6 +327,8 @@ impl Engine {
     }
 
     fn mark_change(&mut self, change: &cosmic_text::Change) {
+        self.matches = None;
+
         if let Some(line) = change.items.iter().map(|item| item.start.line.min(item.end.line)).min() {
             self.mark_changed(line);
         }
@@ -623,6 +655,140 @@ impl Engine {
         }
 
         self.restore(after);
+    }
+
+    pub fn search(&self) -> Option<&Search> {
+        self.search.as_ref()
+    }
+
+    pub fn set_search(&mut self, search: Option<Search>) {
+        let search = search.filter(|search| !search.text.is_empty());
+
+        if search != self.search {
+            self.search = search;
+            self.matches = None;
+        }
+    }
+
+    pub fn matches(&mut self) -> &[Match] {
+        if self.matches.is_none() {
+            let matches = match &self.search {
+                Some(search) => self
+                    .buffer()
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(line, text)| {
+                        text_ops::find_all(text.text(), &search.text, search.match_case, search.whole_word)
+                            .into_iter()
+                            .map(move |range| Match { line, start: range.start, end: range.end })
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+
+            self.matches = Some(matches);
+        }
+
+        self.matches.as_deref().unwrap_or_default()
+    }
+
+    /// The index of the match that is exactly the selection, if any.
+    pub fn current_match(&mut self) -> Option<usize> {
+        let (start, end) = self.editor.selection_bounds()?;
+
+        self.matches()
+            .iter()
+            .position(|m| m.line == start.line && m.line == end.line && m.start == start.index && m.end == end.index)
+    }
+
+    /// Selects a match, wrapping around the ends of the text. Returns whether
+    /// there was one.
+    pub fn find(&mut self, find: Find) -> bool {
+        let cursor = self.editor.cursor();
+        let (start, end) = self.editor.selection_bounds().unwrap_or((cursor, cursor));
+        let start = (start.line, start.index);
+        let end = (end.line, end.index);
+
+        let matches = self.matches();
+        let at = |m: &Match| (m.line, m.start);
+
+        let found = match find {
+            Find::FromCursor => matches.iter().find(|m| at(m) >= start).or(matches.first()),
+            Find::Next => matches.iter().find(|m| at(m) >= end).or(matches.first()),
+            Find::Previous => matches.iter().rev().find(|m| at(m) < start).or(matches.last()),
+        };
+
+        let Some(found) = found.cloned() else {
+            return false;
+        };
+
+        self.history.seal();
+        self.editor.set_selection(cosmic_text::Selection::Normal(cosmic_text::Cursor::new(found.line, found.start)));
+        self.editor.set_cursor(cosmic_text::Cursor::new(found.line, found.end));
+
+        true
+    }
+
+    /// Replaces every match with `with`, as one undo step. Returns how many
+    /// were replaced.
+    pub fn replace_all(&mut self, with: &str) -> usize {
+        let matches = self.matches().to_vec();
+
+        let Some(first) = matches.first() else {
+            return 0;
+        };
+
+        self.history.seal();
+        let before = self.state();
+
+        self.editor.start_change();
+
+        // Back to front, so earlier positions stay valid.
+        for m in matches.iter().rev() {
+            let start = cosmic_text::Cursor::new(m.line, m.start);
+
+            self.editor.delete_range(start, cosmic_text::Cursor::new(m.line, m.end));
+
+            if !with.is_empty() {
+                let _ = self.editor.insert_at(start, with, None);
+            }
+        }
+
+        self.editor.set_selection(cosmic_text::Selection::None);
+        self.editor.set_cursor(cosmic_text::Cursor::new(first.line, first.start));
+
+        if let Some(change) = self.editor.finish_change()
+            && !change.items.is_empty()
+        {
+            self.mark_change(&change);
+
+            let after = self.state();
+            self.history.record(history::Kind::Other, change, before, after);
+            self.history.seal();
+        }
+
+        matches.len()
+    }
+
+    /// The highlighted regions of the matches on the visible lines, relative
+    /// to the text origin.
+    pub fn match_regions(&mut self) -> Vec<Rectangle> {
+        let rows = self.visible_rows();
+
+        let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
+            return Vec::new();
+        };
+
+        let lines = first.line..=last.line;
+        let visible: Vec<Match> = self.matches().iter().filter(|m| lines.contains(&m.line)).cloned().collect();
+
+        visible
+            .iter()
+            .flat_map(|m| {
+                self.regions(cosmic_text::Cursor::new(m.line, m.start), cosmic_text::Cursor::new(m.line, m.end))
+            })
+            .collect()
     }
 
     pub fn move_to(&mut self, cursor: Cursor) {

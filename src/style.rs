@@ -41,6 +41,8 @@ pub struct Style {
     /// The background of the cursor line, drawn while the editor is focused.
     /// Use [`Color::TRANSPARENT`] to turn it off.
     pub current_line: Color,
+    /// The background of search matches, while a search is set.
+    pub search_match: Color,
 }
 
 /// The theme catalog of a [`CodeEditor`](crate::CodeEditor).
@@ -92,6 +94,7 @@ pub fn from_palette(palette: &Extended, status: Status) -> Style {
         line_number: mix(background, text, 0.35),
         active_line_number: mix(background, text, 0.8),
         current_line: mix(background, text, 0.05),
+        search_match: palette.warning.base.color.scale_alpha(0.3),
     };
 
     match status {
