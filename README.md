@@ -12,7 +12,7 @@ The app picks the syntax and the comment token.
 ```toml
 [dependencies]
 iced = { version = "0.14", features = ["highlighter"] }
-iced_code = { git = "https://github.com/matt-baech/iced_code" }
+iced_code = "0.1"
 ```
 
 ```rust
@@ -73,6 +73,10 @@ cargo run --example editor
 - **Word deletion**: Ctrl+Backspace and Ctrl+Delete. On macOS, use Option.
 - **Comment toggling**: Ctrl+/ comments or uncomments the selected lines with the
   token set through `.comment_token("--")`.
+- **Find and replace**: `Content::set_search` highlights every match (match
+  case and whole word optional); `find_next`, `find_previous`, `replace` and
+  `replace_all` (a single undo step) move through and change them. The app
+  provides the find bar, so it fits the app's look.
 - **Autocomplete support**: `Content::caret_bounds()` returns the caret's
   rectangle in window coordinates, and `Content::word_at_cursor()` returns the
   word being typed. The demo uses both for a small suggestion popup.
