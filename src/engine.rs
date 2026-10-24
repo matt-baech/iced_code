@@ -115,28 +115,24 @@ impl Engine {
         }
     }
 
-    pub fn buffer(&self) -> &cosmic_text::Buffer {
+    // The engine always keeps its buffer in an `Arc` (see `with_text`).
+    pub fn buffer(&self) -> &Arc<cosmic_text::Buffer> {
         match self.editor.buffer_ref() {
-            cosmic_text::BufferRef::Owned(buffer) => buffer,
-            cosmic_text::BufferRef::Borrowed(buffer) => buffer,
             cosmic_text::BufferRef::Arc(buffer) => buffer,
+            _ => unreachable!("The engine always keeps its buffer in an Arc"),
         }
     }
 
     fn buffer_mut(&mut self) -> &mut cosmic_text::Buffer {
         match self.editor.buffer_ref_mut() {
-            cosmic_text::BufferRef::Owned(buffer) => buffer,
-            cosmic_text::BufferRef::Borrowed(buffer) => buffer,
             cosmic_text::BufferRef::Arc(buffer) => Arc::make_mut(buffer),
+            _ => unreachable!("The engine always keeps its buffer in an Arc"),
         }
     }
 
     /// A weak reference to the buffer, for the renderer to draw.
     pub fn weak_buffer(&self) -> Weak<cosmic_text::Buffer> {
-        match self.editor.buffer_ref() {
-            cosmic_text::BufferRef::Arc(buffer) => Arc::downgrade(buffer),
-            _ => unreachable!("The engine always keeps its buffer in an Arc"),
-        }
+        Arc::downgrade(self.buffer())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -378,24 +374,10 @@ impl Engine {
 
                 editor.action(font_system, cosmic_text::Action::Motion(to_motion(motion)));
 
-                // Deselect if selection matches cursor position
-                if let Some((start, end)) = editor.selection_bounds()
-                    && start.line == end.line
-                    && start.index == end.index
-                {
-                    editor.set_selection(cosmic_text::Selection::None);
-                }
+                drop_empty_selection(editor);
             }
-            Action::SelectWord => {
-                let cursor = editor.cursor();
-
-                editor.set_selection(cosmic_text::Selection::Word(cursor));
-            }
-            Action::SelectLine => {
-                let cursor = editor.cursor();
-
-                editor.set_selection(cosmic_text::Selection::Line(cursor));
-            }
+            Action::SelectWord => editor.set_selection(cosmic_text::Selection::Word(editor.cursor())),
+            Action::SelectLine => editor.set_selection(cosmic_text::Selection::Line(editor.cursor())),
             Action::SelectAll => {
                 if !self.is_empty() {
                     let editor = &mut self.editor;
@@ -423,13 +405,7 @@ impl Engine {
             Action::Drag(position) => {
                 editor.action(font_system, cosmic_text::Action::Drag { x: position.x as i32, y: position.y as i32 });
 
-                // Deselect if selection matches cursor position
-                if let Some((start, end)) = editor.selection_bounds()
-                    && start.line == end.line
-                    && start.index == end.index
-                {
-                    editor.set_selection(cosmic_text::Selection::None);
-                }
+                drop_empty_selection(editor);
             }
             Action::Scroll { lines } => {
                 let pixels = lines as f32 * self.buffer().metrics().line_height;
@@ -563,6 +539,11 @@ impl Engine {
             }
         }
 
+        self.finish_change(kind, before);
+    }
+
+    /// Ends the change started with `start_change` and records it for undo.
+    fn finish_change(&mut self, kind: history::Kind, before: CursorState) {
         if let Some(change) = self.editor.finish_change()
             && !change.items.is_empty()
         {
@@ -758,15 +739,8 @@ impl Engine {
         self.editor.set_selection(cosmic_text::Selection::None);
         self.editor.set_cursor(cosmic_text::Cursor::new(first.line, first.start));
 
-        if let Some(change) = self.editor.finish_change()
-            && !change.items.is_empty()
-        {
-            self.mark_change(&change);
-
-            let after = self.state();
-            self.history.record(history::Kind::Other, change, before, after);
-            self.history.seal();
-        }
+        self.finish_change(history::Kind::Other, before);
+        self.history.seal();
 
         matches.len()
     }
@@ -987,6 +961,16 @@ fn highlight_line(line: &cosmic_text::BufferLine, from: usize, to: usize) -> imp
             (x, width)
         }
     })
+}
+
+/// Clears a selection that has shrunk to nothing.
+fn drop_empty_selection(editor: &mut cosmic_text::Editor<'static>) {
+    if let Some((start, end)) = editor.selection_bounds()
+        && start.line == end.line
+        && start.index == end.index
+    {
+        editor.set_selection(cosmic_text::Selection::None);
+    }
 }
 
 fn visual_lines_offset(line: usize, buffer: &cosmic_text::Buffer) -> i32 {

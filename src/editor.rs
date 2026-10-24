@@ -1036,14 +1036,10 @@ impl<Message> Binding<Message> {
                 } else if let keyboard::Key::Named(named_key) = key.as_ref() {
                     let motion = motion(named_key)?;
 
-                    let motion = if modifiers.macos_command() {
-                        match motion {
-                            Motion::Left => Motion::Home,
-                            Motion::Right => Motion::End,
-                            _ => motion,
-                        }
-                    } else {
-                        motion
+                    let motion = match motion {
+                        Motion::Left if modifiers.macos_command() => Motion::Home,
+                        Motion::Right if modifiers.macos_command() => Motion::End,
+                        motion => motion,
                     };
 
                     let motion = if modifiers.jump() { motion.widen() } else { motion };
